@@ -1,0 +1,4 @@
+/*          Type               name       tag       default */
+SERIALIZED(std::string      , address  , ADDRESS , "my_address")
+SERIALIZED(std::vector<int> , vecta    , VECTA   , {})
+SERIALIZED(float            , latitude , LAT     , 0.0f)
