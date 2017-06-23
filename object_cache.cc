@@ -1,33 +1,16 @@
-#include <iostream>
-#include <chrono>
-#include <vector>
-#include <atomic>
-#include <stdexcept>
-#include <memory>
 #include <algorithm>
-#include <type_traits>
-#include <cstring>
-#include <cassert>
-#include <thread>
 #include <array>
-
-// for benchmark
-#include <random>
-
-/* CONFIG */
-
-//#define OBJECT_CACHE_USE_ATOMIC_SPIN_LOCK
-//#define OBJECT_CACHE_USE_MUTEX
-//#define OBJECT_CACHE_USE_ATOMIC_DATA_STRUCTURES
-/* end CONFIG */
-
-#ifdef OBJECT_CACHE_USE_MUTEX
-#include <mutex>
-#endif
-
-#ifdef OBJECT_CACHE_USE_ATOMIC_SPIN_LOCK
-#include <mutex>
 #include <atomic>
+#include <cassert>
+#include <chrono>
+#include <cstring>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <chrono>
+#include <type_traits>
+#include <vector>
 
 /* Taken from "Concurrency in Action - Anthony Williams */
 class spinlock_mutex
@@ -44,82 +27,67 @@ public:
     }
 };
 
-#endif
 
-/* Not compatible with stl containers */
-template<typename T, std::size_t N>
-class object_cache_alloc
+
+template<typename T, std::size_t N, typename Lock>
+class object_cache
 {
 private:
-
-#ifdef OBJECT_CACHE_MULTITHREAD
-    std::thread::id owning_thread_id;
-#endif
-
-#ifdef OBJECT_CACHE_USE_MUTEX
-    std::mutex mutex;
-#endif
-
-#ifdef OBJECT_CACHE_USE_ATOMIC_SPIN_LOCK
-    spinlock_mutex spinlock;
-#endif
-
-    int storage_active_count;
-
-#ifdef OBJECT_CACHE_USE_ATOMIC_DATA_STRUCTURES
-    std::array<std::atomic<int>, N> use_map_mark;
-#else
-    std::array<int, N> use_map_mark;
-#endif
-
-    std::array<T *, N> use_map;
+    /* Lock */
+    Lock m_lock;
+    /* How many m_use_map slots are used */
+    std::size_t m_slots_used;
+    /* Max slots ever used */
+    std::size_t m_high_water;
+    /* Index/Slot availability */
+    std::array<bool, N> m_use_map_mark;
+    /* Allocated pointers (mostly for deallocating) */
+    std::array<T *, N> m_use_map;
 
     typename std::aligned_storage<sizeof(T), alignof(T)>::type storage[N];
 
     void clear()
     {
-        for (auto & i : use_map_mark) i = 0;
-        for (auto & i : use_map) i = nullptr;
+        for (auto & i : m_use_map_mark) i = false;
+        for (auto & i : m_use_map) i = nullptr;
     }
 
 public:
-    object_cache_alloc() noexcept :
-#ifdef OBJECT_CACHE_MULTITHREAD
-        owning_thread_id(std::this_thread::get_id()),
-#endif
-        storage_active_count(0)
+    object_cache() noexcept :
+        m_slots_used{0},
+        m_high_water{0}
     {
         clear();
     }
 
-    ~object_cache_alloc() { clear(); }
+    ~object_cache() { clear(); }
 
     T * allocate(std::size_t num = 1)
     {
         assert(num == 1 && "It is only possible to allocate a single object per allocate call");
 
-#ifdef OBJECT_CACHE_USE_MUTEX
-        std::lock_guard<std::mutex> lock{mutex};
-#endif
+        std::lock_guard<Lock> lock{m_lock};
 
-#ifdef OBJECT_CACHE_USE_ATOMIC_SPIN_LOCK
-        std::lock_guard<spinlock_mutex> lock{spinlock};
-#endif
-
-        auto i = std::find(use_map_mark.cbegin(), use_map_mark.cend(), 0);
-        auto next_avail_chunk = std::distance(use_map_mark.cbegin(), i);
+        /* Find the next index/slot available */
+        auto next_unused_slot = std::find(m_use_map_mark.cbegin(), m_use_map_mark.cend(), false);
+        auto next_avail_slot = std::distance(m_use_map_mark.cbegin(), next_unused_slot);
         
-        if (next_avail_chunk == N) {
-            std::cout << "storage active count: " << storage_active_count << std::endl;
+        if (next_avail_slot == N)
             throw std::bad_alloc();
-        }
 
-        use_map_mark[next_avail_chunk] = 1;
+        /* mark it used */
+        m_use_map_mark[next_avail_slot] = true;
 
-        auto * t = static_cast<T *>(new(storage + storage_active_count) T);
-        use_map[next_avail_chunk] = t;
+        /* alloc from storage */
+        auto * t = static_cast<T *>(new(storage + m_slots_used) T);
 
-        storage_active_count++;
+        /* store the pointer */
+        m_use_map[next_avail_slot] = t;
+
+        ++m_slots_used;
+
+        if (m_slots_used > m_high_water)
+            m_high_water = m_slots_used;
 
         return t;
     }
@@ -127,23 +95,24 @@ public:
     void deallocate(T * obj, std::size_t num = 1) noexcept
     {
         assert(num == 1 && "It is only possible to deallocate a single object per deallocate call");
+ 
+        std::lock_guard<Lock> lock{m_lock};
 
-#ifdef OBJECT_CACHE_USE_MUTEX
-        std::lock_guard<std::mutex> lock{mutex};
-#endif
+        auto found = std::find(m_use_map.cbegin(), m_use_map.cend(), obj);
+        auto found_slot = std::distance(m_use_map.cbegin(), found);
 
-#ifdef OBJECT_CACHE_USE_ATOMIC_SPIN_LOCK
-        std::lock_guard<spinlock_mutex> lock{spinlock};
-#endif
-
-        auto i = std::find(use_map.cbegin(), use_map.cend(), obj);
-        auto chunk_location = std::distance(use_map.cbegin(), i);
-
-        use_map_mark[chunk_location] = 0;
-        use_map[chunk_location] = nullptr;
-        storage_active_count--;
+        m_use_map_mark[found_slot] = false;
+        m_use_map[found_slot] = nullptr;
+        --m_slots_used;
     }
 };
+
+
+/////////////////////////////////////////////////
+///////////////// BENCHMARK /////////////////////
+/////////////////////////////////////////////////
+
+#include <random>
 
 //#define BENCH_SHORT_ALLOC
 
@@ -151,15 +120,19 @@ public:
 #include "short_alloc.hh"
 #endif
 
-struct foo {
+struct foo 
+{
+#if 0
     int x;
     float f;
     double d;
-    //char d1[64];
+#else
+    char data[4096];
+#endif
 };
 
 template<typename T>
-void shuffle_t(T & container)
+void shuffle_container(T & container)
 {
     std::random_device rd;
     std::mt19937 g{rd()};
@@ -169,7 +142,7 @@ void shuffle_t(T & container)
 
 int main(void)
 {
-    object_cache_alloc<foo, 100> alloc;
+    object_cache<foo, 100, std::mutex> alloc;
     
     std::vector<int> indices;
     std::vector<int> indices2;
@@ -188,8 +161,8 @@ int main(void)
         foo * foos[100] = {nullptr};
         
         for (int i = 0 ; i < 5000; ++i) {
-            shuffle_t(indices);
-            shuffle_t(indices2);
+            shuffle_container(indices);
+            shuffle_container(indices2);
             for (auto & j : indices) { auto * t = alloc.allocate(1); foos[j] = t; }
             for (auto & j : indices2) { alloc.deallocate(foos[j]); }
         }
@@ -197,7 +170,7 @@ int main(void)
         auto end = std::chrono::steady_clock::now();
         auto res1 = std::chrono::duration <double, std::milli> (end-start).count();
         
-        std::cout << "object_cache_alloc took " << (res1 / 5000.0f) << std::endl;
+        std::cout << "object_cache took " << (res1) << std::endl;
     }
     
     ///////////////////
@@ -206,8 +179,8 @@ int main(void)
         auto start = std::chrono::steady_clock::now();
         
         for (int i = 0 ; i < 5000; ++i) {
-            shuffle_t(indices);
-            shuffle_t(indices2);
+            shuffle_container(indices);
+            shuffle_container(indices2);
             for (auto & j : indices) { foo * t = reinterpret_cast<foo *>(std::calloc(1, sizeof(foo))); foos[j] = t; }
             for (auto & j : indices2) { std::free(foos[j]); }
         }
@@ -215,7 +188,7 @@ int main(void)
         auto end = std::chrono::steady_clock::now();
         auto res2 = std::chrono::duration <double, std::milli> (end-start).count();
         
-        std::cout << "malloc took " << (res2 / 5000.0f) << std::endl;
+        std::cout << "malloc took " << (res2) << std::endl;
     }
     
     ///////////////////
@@ -229,8 +202,8 @@ int main(void)
         short_alloc<foo, (sizeof(foo) * 100), alignof(foo)> sa{ar};
         
         for (int i = 0 ; i < 5000; ++i) {
-            shuffle_t(indices);
-            shuffle_t(indices2);
+            shuffle_container(indices);
+            shuffle_container(indices2);
             for (auto & j : indices) { auto * t = sa.allocate(1); foos[j] = t; }
             for (auto & j : indices2) { sa.deallocate(foos[j], 1); }
         }
