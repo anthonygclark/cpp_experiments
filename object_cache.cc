@@ -45,6 +45,7 @@ public:
 
     object_cache(object_cache const &) = default;
     object_cache(object_cache &&) = default;
+    object_cache& operator=(object_cache &&) = default;
     object_cache& operator=(object_cache const &) = delete;
 
     ~object_cache()
@@ -65,7 +66,7 @@ public:
         auto next_unused_slot = std::find(m_use_map_mark.cbegin(), m_use_map_mark.cend(), false);
         auto next_avail_slot = std::distance(m_use_map_mark.cbegin(), next_unused_slot);
 
-        if (next_avail_slot == N)
+        if (next_avail_slot == N || next_avail_slot + num > N)
             throw std::bad_alloc();
 
         /* mark it used */
@@ -92,12 +93,12 @@ public:
         auto found = std::find(m_use_map.cbegin(), m_use_map.cend(), obj);
         auto found_slot = std::distance(m_use_map.cbegin(), found);
 
+        if (found_slot + num > N)
+            throw std::bad_alloc();
+
         for (std::size_t i = 0; i < num; ++i)
         {
-            /* Destruct
-             * TODO it is desirable to not destruct until clear, but then we
-             * risk overriding the pointer...
-             */
+            /* Destruct */
             auto obj = m_use_map[found_slot + i];
             obj->~T();
             obj = nullptr;
@@ -126,7 +127,7 @@ struct foo
 };
 
 ////////////////////////////////// SIMPLE TEST
-#if 1
+#if 0
 int main()
 {
     using cache = object_cache<foo, 100>;
