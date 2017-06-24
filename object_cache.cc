@@ -50,61 +50,58 @@ public:
 
     ~object_cache()
     {
-        print();
         clear();
     }
 
-    void print() {
-        std::cout << "OBJECT_CACHE: slots-used: "
-            << m_slots_used
-            << " high-water: " << m_high_water << std::endl;
+    std::pair<std::size_t, std::size_t> get_info() const {
+        return std::make_pair(m_slots_used, m_high_water);
     }
 
-    T * allocate(std::size_t num = 1)
+    T * allocate(std::size_t num)
     {
-        /* Find the next index/slot available */
-        auto next_unused_slot = std::find(m_use_map_mark.cbegin(), m_use_map_mark.cend(), false);
-        auto next_avail_slot = std::distance(m_use_map_mark.cbegin(), next_unused_slot);
+        /* Find group of num slots available */
+        auto slot_range_start_ = std::search_n(m_use_map_mark.cbegin(), m_use_map_mark.cend(), num, false);
+        auto slot_range_start = std::distance(m_use_map_mark.cbegin(), slot_range_start_);
 
-        if (next_avail_slot == N || next_avail_slot + num > N)
+        if (slot_range_start_ == m_use_map_mark.cend() || slot_range_start + num > N)
             throw std::bad_alloc();
 
-        /* mark it used */
-        for (std::size_t i = 0; i < num; ++i)
-            m_use_map_mark[next_avail_slot + i] = true;
-
         /* alloc from storage */
-        auto * res = static_cast<T *>(new(storage + m_slots_used) T[num]);
+        auto * ret = (new(storage + m_slots_used) T[num]);
+        auto * ret_ = ret;
 
         /* store the pointers */
-        for (std::size_t i = 0; i < num; ++i)
-            m_use_map[next_avail_slot + i] = res + (sizeof(T) * i);
+        for (std::size_t i = 0; i < num; ++i) {
+            m_use_map_mark[slot_range_start + i] = true;
+            m_use_map[slot_range_start + i] = ret_++;
+        }
 
         m_slots_used += num;
 
         if (m_slots_used > m_high_water)
             m_high_water = m_slots_used;
 
-        return res;
+        return ret;
     }
 
-    void deallocate(T * obj, std::size_t num = 1) noexcept
+    void deallocate(T * obj, std::size_t num)
     {
+        /* Find obj in the use map */
         auto found = std::find(m_use_map.cbegin(), m_use_map.cend(), obj);
-        auto found_slot = std::distance(m_use_map.cbegin(), found);
+        auto slot_start = std::distance(m_use_map.cbegin(), found);
 
-        if (found_slot + num > N)
+        if (found == m_use_map.cend() || slot_start + num > N)
             throw std::bad_alloc();
 
         for (std::size_t i = 0; i < num; ++i)
         {
             /* Destruct */
-            auto obj = m_use_map[found_slot + i];
+            auto obj = m_use_map[slot_start + i];
             obj->~T();
             obj = nullptr;
 
             /* Mark it unused */
-            m_use_map_mark[found_slot + i] = false;
+            m_use_map_mark[slot_start + i] = false;
             --m_slots_used;
         }
     }
@@ -119,10 +116,11 @@ struct foo
 {
 #if 0
     int x;
-    float f;
-    double d;
 #else
-    char data[4096];
+    float x;
+    char data[1024];
+    uint8_t z;
+    int a;
 #endif
 };
 
@@ -130,18 +128,14 @@ struct foo
 #if 0
 int main()
 {
-    using cache = object_cache<foo, 100>;
-    using my_vec = std::vector<foo, object_cache<foo, 100>>;
+    using cache = object_cache<foo, 50>;
+    using my_vec = std::vector<foo, object_cache<foo, 50>>;
 
     cache alloc;
     my_vec v{alloc};
 
     for (size_t i = 0; i < 10; i++)
-        v.push_back(foo{});
-
-    auto a = v.get_allocator();
-    a.print();
-
+        v.emplace_back();
 }
 
 /////////////////////////////////// FULL BENCHMARK
@@ -187,7 +181,7 @@ int main(void)
             shuffle_container(indices);
             shuffle_container(indices2);
             for (auto & j : indices) { auto * t = alloc.allocate(1); foos[j] = t; }
-            for (auto & j : indices2) { alloc.deallocate(foos[j]); }
+            for (auto & j : indices2) { alloc.deallocate(foos[j], 1); }
         }
 
         auto end = std::chrono::steady_clock::now();
