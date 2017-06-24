@@ -115,12 +115,12 @@ public:
 struct foo
 {
 #if 0
-    int x;
+    char data[4096];
 #else
-    float x;
-    char data[1024];
-    uint8_t z;
-    int a;
+    int x[110];
+    float y[400];
+    uint8_t g,q,e;
+    uint_least16_t s;
 #endif
 };
 
@@ -180,7 +180,7 @@ int main(void)
         for (int i = 0 ; i < 5000; ++i) {
             shuffle_container(indices);
             shuffle_container(indices2);
-            for (auto & j : indices) { auto * t = alloc.allocate(1); foos[j] = t; }
+            for (auto & j : indices) { foos[j] = alloc.allocate(1); }
             for (auto & j : indices2) { alloc.deallocate(foos[j], 1); }
         }
 
@@ -198,14 +198,32 @@ int main(void)
         for (int i = 0 ; i < 5000; ++i) {
             shuffle_container(indices);
             shuffle_container(indices2);
-            for (auto & j : indices) { foo * t = reinterpret_cast<foo *>(std::calloc(1, sizeof(foo))); foos[j] = t; }
+            for (auto & j : indices) { foos[j] = reinterpret_cast<foo *>(std::calloc(1, sizeof(foo))); }
             for (auto & j : indices2) { std::free(foos[j]); }
         }
 
         auto end = std::chrono::steady_clock::now();
-        auto res2 = std::chrono::duration <double, std::milli> (end-start).count();
+        auto res = std::chrono::duration <double, std::milli> (end-start).count();
 
-        std::cout << "malloc took " << (res2) << std::endl;
+        std::cout << "calloc/free took " << (res) << std::endl;
+    }
+
+    ///////////////////
+    {
+        foo * foos[100] = {nullptr};
+        auto start = std::chrono::steady_clock::now();
+
+        for (int i = 0 ; i < 5000; ++i) {
+            shuffle_container(indices);
+            shuffle_container(indices2);
+            for (auto & j : indices) { foos[j] = new foo{}; }
+            for (auto & j : indices2) { delete foos[j]; }
+        }
+
+        auto end = std::chrono::steady_clock::now();
+        auto res = std::chrono::duration <double, std::milli> (end-start).count();
+
+        std::cout << "new/delete took " << (res) << std::endl;
     }
 
     ///////////////////
