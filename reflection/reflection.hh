@@ -44,23 +44,23 @@ namespace NAMESPACE_NAME
         /// multiple identical template args ... maybe boost::variant
         /// filters via MPL
         using variant = boost::variant<
-#           define SERIALIZED(rt,n,c,d) rt,
+#           define REFLECT(rt,n,c,d) rt,
 #           include INCLUDE_FILE
-#           undef SERIALIZED
+#           undef REFLECT
             std::nullptr_t // terminator since we cant end in a comma
             >;
 
         /// Creates properties
-#       define SERIALIZED(rt,n,c,d) rt n = d;
+#       define REFLECT(rt,n,c,d) rt n = d;
 #       include INCLUDE_FILE
-#       undef SERIALIZED
+#       undef REFLECT
 
     public:
         /// Item tags
         enum Tag {
-#           define SERIALIZED(rt,n,c,d) c,
+#           define REFLECT(rt,n,c,d) c,
 #           include INCLUDE_FILE
-#           undef SERIALIZED
+#           undef REFLECT
         };
 
         /// Templated get from Tag key
@@ -88,9 +88,9 @@ namespace NAMESPACE_NAME
             // set the property
             switch(tag)
             {
-#           define SERIALIZED(rt,n,c,d) case c: n = boost::get<rt>(value); break;
+#           define REFLECT(rt,n,c,d) case c: n = boost::get<rt>(value); break;
 #           include INCLUDE_FILE
-#           undef SERIALIZED
+#           undef REFLECT
             default:
                 throw std::runtime_error("Invalid Tag");
             }
@@ -104,36 +104,36 @@ namespace NAMESPACE_NAME
         }
 
         /// Generates a set-property function for each propery
-#       define SERIALIZED(rt,n,c,d) void set_ ## n(rt val) { set(c, val); }
+#       define REFLECT(rt,n,c,d) void set_ ## n(rt val) { set(c, val); }
 #       include INCLUDE_FILE
-#       undef SERIALIZED
+#       undef REFLECT
 
         /// Generates a getter for each property
-#       define SERIALIZED(rt,n,c,d) rt const & get_ ## n() const { return n; }
+#       define REFLECT(rt,n,c,d) rt const & get_ ## n() const { return n; }
 #       include INCLUDE_FILE
-#       undef SERIALIZED
+#       undef REFLECT
 
     private:
         /// Statically creates a tag->variant map
         std::map<Tag, variant> mapped_items =
         {
-#       define SERIALIZED(rt,n,c,d) { c, rt(d) },
+#       define REFLECT(rt,n,c,d) { c, rt(d) },
 #       include INCLUDE_FILE
-#       undef SERIALIZED
+#       undef REFLECT
         };
 
         /// Statically creates a string->tag lookup map
         std::map<std::string, Tag> item_lookup =
         {
-#       define SERIALIZED(rt,n,c,d) { STRINGIFY(n), c },
+#       define REFLECT(rt,n,c,d) { STRINGIFY(n), c },
 #       include INCLUDE_FILE
-#       undef SERIALIZED
+#       undef REFLECT
         };
     };
 
 #undef STRINGIFY
 #undef XSTRINGIFY
 #undef INCLUDE_FILE
-#undef SERIALIZED
+#undef REFLECT
 #undef NAMESPACE_NAME
 }

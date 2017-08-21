@@ -1,4 +1,6 @@
-/*          Type               name       tag       default */
-SERIALIZED(std::string      , address  , ADDRESS , "my_address")
-SERIALIZED(std::vector<int> , vecta    , VECTA   , {})
-SERIALIZED(float            , latitude , LAT     , 0.0f)
+// vim: ft=cpp
+
+/*      Type               name       tag       default */
+REFLECT(std::string      , address  , ADDRESS , "my_address")
+REFLECT(std::vector<int> , vecta    , VECTA   , {})
+REFLECT(float            , latitude , LAT     , 0.0f)

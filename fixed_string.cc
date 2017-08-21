@@ -13,10 +13,9 @@ struct FixedString
 {
     char m_data[N];
     std::size_t m_length;
-    std::size_t m_hash;
 
     FixedString() noexcept :
-        m_length(0), m_hash(0)
+        m_length(0)
     {
         std::memset(m_data, 0, N);
     }
@@ -59,7 +58,7 @@ struct FixedString
         using concreate_length_type = decltype(std::declval<FixedString<N>>().length());
 
         concreate_data_type_pointer data_ptr = c_str();
-        
+
         std::size_t h1 = djb2_start;
 
         /* djb2 hash algorithm (http://www.cse.yorku.ca/~oz/hash.html) */
@@ -129,7 +128,7 @@ int main()
     // as key
     std::map<FixedString<64>, int> map;
     map.emplace("test", 2);
-    
+
     for (auto & t : map)
         std::printf("map[%s] = '%d'\n", t.first.c_str(), t.second);
 
